@@ -1,0 +1,5 @@
+build/
+*.o
+*.exe
+saves/save.txt
+saves/test_save.txt

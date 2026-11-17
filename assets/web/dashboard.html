@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Disaster Rescue Commander - Companion Dashboard</title>
+<style>
+body{background:#081426;color:#dce6f0;font-family:system-ui,sans-serif;margin:0;padding:24px}
+.card{background:#102a43;border:1px solid #00d9ff55;border-radius:14px;padding:16px;margin:12px 0;max-width:720px}
+h1{color:#00d9ff} .ok{color:#8bff5a} .warn{color:#ffd43b} .bad{color:#f04452}
+button{background:#1677ff;color:#fff;border:0;border-radius:10px;padding:10px 16px;cursor:pointer}
+</style></head><body>
+<h1>Disaster Rescue Commander</h1>
+<p>Companion dashboard. Live data comes from the C++ engine save file (<code>saves/save.txt</code>) — no hardcoded sample values.</p>
+<div class="card"><h2>Mission</h2><pre id="mission">Loading…</pre></div>
+<div class="card"><h2>Vehicles</h2><pre id="vehicles">Loading…</pre></div>
+<div class="card"><h2>Civilians</h2><pre id="civilians">Loading…</pre></div>
+<button onclick="loadData()">Refresh from save file</button>
+<script>
+async function loadData(){
+  try{
+    const t = await (await fetch('../../saves/save.txt')).text();
+    document.getElementById('mission').textContent = t;
+  }catch(e){ document.getElementById('mission').textContent = 'No save file yet. Play the game first (it writes saves/save.txt).'; }
+}
+loadData();
+</script></body></html>

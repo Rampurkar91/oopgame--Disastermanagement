@@ -1,0 +1,6 @@
+volume=70
+musicVolume=50
+soundOn=1
+musicOn=1
+graphicsQuality=1
+animationSpeed=1.0
