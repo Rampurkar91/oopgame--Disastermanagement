@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Disaster Rescue Commander — Companion Dashboard</title>
+  <style>
+    :root{color-scheme:dark;background:#081426;color:#dce6f0;font-family:system-ui,sans-serif}
+    body{margin:0;padding:24px;max-width:980px;margin-inline:auto}
+    h1{color:#00d9ff;margin-bottom:6px}.hint{color:#9bb1c4;margin-top:0}
+    .toolbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:20px 0}
+    .card{background:#102a43;border:1px solid #00d9ff55;border-radius:14px;padding:16px;margin:12px 0}
+    .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 12px}
+    h2{font-size:16px;color:#00d9ff;margin:0 0 10px}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;font:13px/1.6 ui-monospace,monospace}
+    button,.file-label{display:inline-block;background:#1677ff;color:#fff;border:0;border-radius:9px;padding:10px 14px;cursor:pointer;font:inherit}
+    input[type=file]{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+    .status{color:#ffd43b;min-height:1.5em}.ok{color:#8bff5a}
+  </style>
+</head>
+<body>
+  <h1>Disaster Rescue Commander</h1>
+  <p class="hint">Read-only companion view of the C++ engine save file. It never creates or simulates mission data.</p>
+  <div class="toolbar">
+    <label class="file-label" for="saveFile">Open saves/save.txt</label>
+    <input id="saveFile" type="file" accept=".txt,text/plain">
+    <button id="refresh">Refresh from project path</button>
+    <span id="status" class="status">Choose the save file, or serve the project directory to use refresh.</span>
+  </div>
+  <div class="grid">
+    <section class="card"><h2>Mission</h2><pre id="mission">No save loaded.</pre></section>
+    <section class="card"><h2>Vehicles</h2><pre id="vehicles">No save loaded.</pre></section>
+    <section class="card"><h2>Civilians</h2><pre id="civilians">No save loaded.</pre></section>
+    <section class="card"><h2>Hospitals</h2><pre id="hospitals">No save loaded.</pre></section>
+  </div>
+<script>
+const statusNames = ["Waiting", "Assigned", "Rescued", "Admitted", "Treated"];
+const vehicleNames = {1:"Ambulance", 2:"Rescue Van", 3:"Fire Truck", 4:"Helicopter"};
+
+function renderSave(text, source) {
+  const values = {};
+  const vehicles = [];
+  const civilians = [];
+  const hospitals = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const pair = line.match(/^(level|score|time)=(.*)$/);
+    if (pair) { values[pair[1]] = pair[2]; continue; }
+    const fields = line.split(/\s+/);
+    if (fields[0] === "vehicle" && fields.length >= 6) {
+      const [kind, id, row, col, fuel, supplies] = fields;
+      vehicles.push({id:+id,row:+row,col:+col,fuel:+fuel,supplies:+supplies});
+    } else if (fields[0] === "civilian" && fields.length >= 4) {
+      const [,id,health,state,assignedVehicle="-1",hospital="-1"] = fields;
+      civilians.push({id:+id,health:+health,state:+state,assignedVehicle:+assignedVehicle,hospital:+hospital});
+    } else if (fields[0] === "hospital" && fields.length >= 3) {
+      hospitals.push({id:+fields[1],occupied:+fields[2]});
+    }
+  }
+  if (values.level === undefined || !vehicles.length || !civilians.length) {
+    throw new Error("The selected file is not a complete Disaster Rescue Commander save.");
+  }
+  document.getElementById("mission").textContent =
+    `Level: ${values.level}\nScore: ${values.score ?? "—"}\nTime remaining: ${values.time ?? "—"}\nCivilians: ${civilians.length}`;
+  document.getElementById("vehicles").textContent = vehicles.map(v =>
+    `${vehicleNames[v.id] ?? `Vehicle ${v.id}`}  |  pos (${v.row},${v.col})  |  fuel ${v.fuel}  |  supplies ${v.supplies}`
+  ).join("\n") || "No vehicle records.";
+  document.getElementById("civilians").textContent = civilians.map(c => {
+    const state = statusNames[c.state] ?? `Unknown (${c.state})`;
+    const assignment = c.assignedVehicle >= 0 ? `  |  vehicle ${c.assignedVehicle}` : "";
+    return `P${c.id}  |  health ${c.health}  |  ${state}${assignment}`;
+  }).join("\n") || "No civilian records.";
+  document.getElementById("hospitals").textContent = hospitals.map(h =>
+    `Hospital ${h.id}  |  ${h.occupied} admitted`
+  ).join("\n") || "No hospital records.";
+  const message = document.getElementById("status");
+  message.textContent = `Loaded live save data from ${source}.`;
+  message.className = "status ok";
+}
+
+async function refreshFromProject() {
+  const message = document.getElementById("status");
+  try {
+    const response = await fetch("../../saves/save.txt", {cache:"no-store"});
+    if (!response.ok) throw new Error("Save file not found.");
+    renderSave(await response.text(), "saves/save.txt");
+  } catch (error) {
+    message.textContent = `${error.message} Use “Open saves/save.txt” (no local web server required).`;
+    message.className = "status";
+  }
+}
+
+document.getElementById("saveFile").addEventListener("change", async event => {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  try { renderSave(await file.text(), file.name); }
+  catch (error) {
+    document.getElementById("status").textContent = error.message;
+    document.getElementById("status").className = "status";
+  }
+});
+document.getElementById("refresh").addEventListener("click", refreshFromProject);
+// Attempt same-origin refresh when hosted; local file:// use is supported through the picker.
+if (location.protocol !== "file:") refreshFromProject();
+</script>
+</body>
+</html>
