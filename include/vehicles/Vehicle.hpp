@@ -2,8 +2,11 @@
 #include "../core/Position.hpp"
 #include "../core/GameState.hpp"
 #include "../map/DisasterMap.hpp"
-#include <string>
+#include <algorithm>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace drc {
 
@@ -40,6 +43,12 @@ public:
         if (supplies_ <= 0) return false;
         --supplies_;
         return true;
+    }
+    void restoreResources(int fuel, int supplies) {
+        fuel_ = std::max(0, std::min(maxFuel_, fuel));
+        supplies_ = std::max(0, supplies);
+        if (fuel_ == 0) status_ = VehicleStatus::OutOfFuel;
+        else if (status_ == VehicleStatus::OutOfFuel) status_ = VehicleStatus::Idle;
     }
     void refuel() { fuel_ = maxFuel_; if (status_ == VehicleStatus::OutOfFuel) status_ = VehicleStatus::Idle; }
     double fuelPercent() const { return maxFuel_ ? (100.0 * fuel_ / maxFuel_) : 0.0; }

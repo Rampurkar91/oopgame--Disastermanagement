@@ -1,24 +1,29 @@
 #ifdef DRC_HAS_SFML
 #include "../../include/ui/MapRenderer.hpp"
+#include "../../include/ui/Theme.hpp"
 namespace drc {
 MapRenderer::MapRenderer(sf::Vector2f origin, float cellSize) : origin_(origin), cellSize_(cellSize) {}
 sf::Color MapRenderer::colorFor(CellType t) const {
     switch (t) {
-        case CellType::Road: return sf::Color(30, 60, 90);
-        case CellType::Blocked: return sf::Color(120, 120, 130);
-        case CellType::Flood: return sf::Color(0, 150, 200);
-        case CellType::Fire: return sf::Color(240, 68, 82);
-        case CellType::House: return sf::Color(60, 80, 110);
-        case CellType::Hospital: return sf::Color(0, 191, 166);
-        case CellType::FireStation: return sf::Color(255, 159, 28);
+        case CellType::Road: return theme::DeepBlueColor;
+        case CellType::Blocked: return theme::RoyalVioletColor;
+        case CellType::Flood: return theme::ElectricBlueColor;
+        case CellType::Fire: return theme::EmergencyRedColor;
+        case CellType::House: return theme::MidnightNavyColor;
+        case CellType::Hospital: return theme::TealColor;
+        case CellType::FireStation: return theme::AmberColor;
     }
-    return sf::Color::White;
+    return theme::NeonCyanColor;
 }
 bool MapRenderer::cellFromPixel(sf::Vector2f pixel, Position& out) const {
-    float cs = cellSize_ * zoom_;
-    int c = int((pixel.x - origin_.x) / cs);
-    int r = int((pixel.y - origin_.y) / cs);
-    if (r < 0 || r >= DisasterMap::ROWS || c < 0 || c >= DisasterMap::COLS) return false;
+    const float cs = cellSize_ * zoom_;
+    const float width = cs * DisasterMap::COLS;
+    const float height = cs * DisasterMap::ROWS;
+    // Check pixel bounds before converting: int(-0.2) truncates to zero in C++.
+    if (pixel.x < origin_.x || pixel.y < origin_.y ||
+        pixel.x >= origin_.x + width || pixel.y >= origin_.y + height) return false;
+    const int c = static_cast<int>((pixel.x - origin_.x) / cs);
+    const int r = static_cast<int>((pixel.y - origin_.y) / cs);
     out = {r, c};
     return true;
 }
@@ -36,9 +41,9 @@ void MapRenderer::draw(sf::RenderWindow& w, GameEngine& engine, const sf::Font& 
     // Route preview (glowing line).
     auto route = engine.lastRoute();
     if (route.found) {
-        sf::Color rc = engine.routeMode() == RouteMode::Fastest ? sf::Color(0,217,255)
-                       : engine.routeMode() == RouteMode::Safest ? sf::Color(139,255,90)
-                       : sf::Color(255,94,53);
+        sf::Color rc = engine.routeMode() == RouteMode::Fastest ? theme::NeonCyanColor
+                       : engine.routeMode() == RouteMode::Safest ? theme::NeonGreenColor
+                       : theme::RescueOrangeColor;
         for (size_t i = 1; i < route.path.size(); ++i) {
             sf::Vertex line[] = {
                 sf::Vertex({origin_.x + route.path[i-1].col * cs + cs/2, origin_.y + route.path[i-1].row * cs + cs/2}, rc),
@@ -52,21 +57,28 @@ void MapRenderer::draw(sf::RenderWindow& w, GameEngine& engine, const sf::Font& 
         if (civ.isRescued()) continue;
         sf::CircleShape dot(8);
         dot.setPosition(origin_.x + civ.position().col * cs + cs/2 - 8, origin_.y + civ.position().row * cs + cs/2 - 8);
-        dot.setFillColor(civ.condition() == HealthCondition::Critical ? sf::Color(240,68,82) : sf::Color(255,212,59));
+        const sf::Color civilianColor = civ.condition() == HealthCondition::Critical ? theme::EmergencyRedColor
+                                      : civ.condition() == HealthCondition::Injured ? theme::WarningYellowColor
+                                      : theme::EmeraldColor;
+        dot.setFillColor(civilianColor);
         w.draw(dot);
-        sf::Text t; t.setFont(font); t.setString(civ.name()); t.setCharacterSize(10);
-        t.setPosition(dot.getPosition() + sf::Vector2f(0, -12));
-        w.draw(t);
+        if (!font.getInfo().family.empty()) {
+            sf::Text t; t.setFont(font); t.setString(civ.name()); t.setCharacterSize(10);
+            t.setPosition(dot.getPosition() + sf::Vector2f(0, -12));
+            w.draw(t);
+        }
     }
     // Vehicles.
     for (auto& v : engine.vehicles()) {
         sf::RectangleShape box(sf::Vector2f(20, 14));
         box.setPosition(origin_.x + v->position().col * cs + cs/2 - 10, origin_.y + v->position().row * cs + cs/2 - 7);
-        box.setFillColor(v->id() == engine.selectedVehicleId() ? sf::Color(0,217,255) : sf::Color(22,119,255));
+        box.setFillColor(v->id() == engine.selectedVehicleId() ? theme::NeonCyanColor : theme::ElectricBlueColor);
         w.draw(box);
-        sf::Text t; t.setFont(font); t.setString(v->name().substr(0,4)); t.setCharacterSize(9);
-        t.setPosition(box.getPosition() + sf::Vector2f(0, -12));
-        w.draw(t);
+        if (!font.getInfo().family.empty()) {
+            sf::Text t; t.setFont(font); t.setString(v->name().substr(0,4)); t.setCharacterSize(9);
+            t.setPosition(box.getPosition() + sf::Vector2f(0, -12));
+            w.draw(t);
+        }
     }
 }
 } // namespace drc

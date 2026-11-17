@@ -15,7 +15,6 @@ add_library(DisasterCore STATIC
     src/algorithms/RouteStrategy.cpp
     src/managers/GameEngine.cpp
     src/managers/SaveManager.cpp
-    src/ui/AudioManager.cpp
 )
 target_include_directories(DisasterCore PUBLIC include)
 
@@ -39,6 +38,7 @@ if(DRC_HAS_SFML)
         src/ui/Button.cpp
         src/ui/Panel.cpp
         src/ui/ParticleSystem.cpp
+        src/ui/AudioManager.cpp
     )
     target_compile_definitions(DisasterRescueCommander PRIVATE DRC_HAS_SFML)
     target_link_libraries(DisasterRescueCommander PRIVATE DisasterCore sfml-graphics sfml-window sfml-system sfml-audio)

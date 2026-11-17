@@ -1,6 +1,7 @@
 #include "../../include/managers/GameEngine.hpp"
 #include "../../include/managers/SaveManager.hpp"
 #include <algorithm>
+#include <exception>
 #include <sstream>
 
 namespace drc {
@@ -63,7 +64,13 @@ const Vehicle* GameEngine::selectedVehicle() const {
     for (auto& v : vehicles_) if (v->id() == selectedVehicleId_) return v.get();
     return nullptr;
 }
-void GameEngine::selectVehicle(int id) { if (findVehicle(id)) selectedVehicleId_ = id; }
+void GameEngine::selectVehicle(int id) {
+    if (!findVehicle(id) || selectedVehicleId_ == id) return;
+    selectedVehicleId_ = id;
+    // A route belongs to the vehicle that planned it; never reuse it for another unit.
+    hasRoute_ = false;
+    lastRoute_ = DijkstraResult{};
+}
 
 int GameEngine::rescuedCount() const {
     int n = 0; for (auto& c : civilians_) if (c.isRescued()) ++n; return n;
@@ -74,7 +81,7 @@ DijkstraResult GameEngine::planRoute(Position goal) {
     Vehicle* v = selectedVehicle();
     if (!v) return DijkstraResult{};
     lastGoal_ = goal;
-    lastRoute_ = Dijkstra::findPath(map_, v->position(), goal, routeMode_, v->kind());
+    lastRoute_ = Dijkstra::findPath(map_, v->position(), goal, routeMode_, *v);
     hasRoute_ = lastRoute_.found;
     return lastRoute_;
 }
@@ -85,8 +92,14 @@ bool GameEngine::moveVehicleAlongRoute() {
     // Move one step along the planned path (fuel checked per step).
     // Find current index in path.
     size_t idx = 0;
-    for (size_t i = 0; i < lastRoute_.path.size(); ++i) if (lastRoute_.path[i] == v->position()) { idx = i; break; }
-    if (idx + 1 >= lastRoute_.path.size()) return false;
+    bool foundCurrentPosition = false;
+    for (size_t i = 0; i < lastRoute_.path.size(); ++i) {
+        if (lastRoute_.path[i] == v->position()) { idx = i; foundCurrentPosition = true; break; }
+    }
+    if (!foundCurrentPosition || idx + 1 >= lastRoute_.path.size()) {
+        hasRoute_ = false;
+        return false;
+    }
     Position next = lastRoute_.path[idx + 1];
     if (!v->hasFuelFor(1)) { v->setStatus(VehicleStatus::OutOfFuel); return false; }
     v->consumeFuel(1);
@@ -120,6 +133,9 @@ RescueResult GameEngine::deliverToHospital(int civilianId, int hospitalId) {
     Hospital* h = findHospital(hospitalId);
     if (!v || !c || !h) { r.message = "Invalid delivery target."; return r; }
     if (c->status() != CivilianStatus::Rescued) { r.message = "Civilian must be rescued first."; return r; }
+    if (c->assignedVehicleId() >= 0 && c->assignedVehicleId() != v->id()) {
+        r.message = "The assigned rescue vehicle must deliver this civilian."; return r;
+    }
     if (!(v->position() == h->position())) { r.message = "Vehicle must reach the hospital first."; return r; }
     if (!h->hasSpace()) { r.message = h->name() + " is full."; return r; }
     h->admit();
@@ -138,11 +154,14 @@ RescueResult GameEngine::treatCivilian(int civilianId) {
     Vehicle* v = selectedVehicle();
     Civilian* c = findCivilian(civilianId);
     if (!v || !c) { r.message = "Invalid treatment target."; return r; }
-    if (c->isRescued() && c->status() == CivilianStatus::Admitted) { r.message = "Already admitted."; return r; }
+    if (c->status() == CivilianStatus::Admitted || c->status() == CivilianStatus::Rescued) {
+        r.message = "This civilian has already been rescued."; return r;
+    }
+    if (c->status() == CivilianStatus::Treated) { r.message = "This civilian has already been treated."; return r; }
     if (!(v->position() == c->position())) { r.message = "Vehicle must reach the civilian first."; return r; }
     if (!v->useSupply()) { r.message = "No medical supplies left."; return r; }
     c->setHealth(std::min(100, c->health() + 20));
-    if (c->status() == CivilianStatus::Waiting || c->status() == CivilianStatus::Assigned) c->setStatus(CivilianStatus::Treated);
+    c->setStatus(CivilianStatus::Treated);
     r.success = true;
     r.scoreGained = 20; // medical treatment bonus
     score_ += r.scoreGained;
@@ -185,7 +204,8 @@ bool GameEngine::saveGame(const std::string& path) const {
     std::ostringstream ss;
     ss << "level=" << level_ << "\nscore=" << score_ << "\ntime=" << timeLeft_ << "\n";
     for (auto& v : vehicles_) ss << "vehicle " << v->id() << " " << v->position().row << " " << v->position().col << " " << v->fuel() << " " << v->supplies() << "\n";
-    for (auto& c : civilians_) ss << "civilian " << c.id() << " " << c.health() << " " << (int)c.status() << "\n";
+    for (auto& c : civilians_) ss << "civilian " << c.id() << " " << c.health() << " " << (int)c.status()
+                                   << " " << c.assignedVehicleId() << " " << c.hospitalId() << "\n";
     for (auto& h : hospitals_) ss << "hospital " << h->id() << " " << h->occupied() << "\n";
     return SaveManager::saveText(path, ss.str());
 }
@@ -197,31 +217,58 @@ bool GameEngine::loadGame(const std::string& path) {
     std::string line;
     int lvl = 1, sc = 0, tm = 80;
     struct VSave {int id,r,c,f,s;}; std::vector<VSave> vs;
-    struct CSave {int id,h,st;}; std::vector<CSave> cs;
+    struct CSave {int id,h,st,vehicleId,hospitalId;}; std::vector<CSave> cs;
     struct HSave {int id,occ;}; std::vector<HSave> hs;
-    while (std::getline(in, line)) {
-        std::istringstream ls(line);
-        std::string key; ls >> key;
-        if (key.rfind("level=", 0) == 0) lvl = std::stoi(key.substr(6));
-        else if (key.rfind("score=", 0) == 0) sc = std::stoi(key.substr(6));
-        else if (key.rfind("time=", 0) == 0) tm = std::stoi(key.substr(5));
-        else if (key == "vehicle") { VSave v; ls >> v.id >> v.r >> v.c >> v.f >> v.s; vs.push_back(v); }
-        else if (key == "civilian") { CSave c; ls >> c.id >> c.h >> c.st; cs.push_back(c); }
-        else if (key == "hospital") { HSave h; ls >> h.id >> h.occ; hs.push_back(h); }
+    try {
+        while (std::getline(in, line)) {
+            std::istringstream ls(line);
+            std::string key; ls >> key;
+            if (key.rfind("level=", 0) == 0) lvl = std::stoi(key.substr(6));
+            else if (key.rfind("score=", 0) == 0) sc = std::stoi(key.substr(6));
+            else if (key.rfind("time=", 0) == 0) tm = std::stoi(key.substr(5));
+            else if (key == "vehicle") {
+                VSave v{};
+                if (!(ls >> v.id >> v.r >> v.c >> v.f >> v.s)) return false;
+                vs.push_back(v);
+            } else if (key == "civilian") {
+                CSave c{}; c.vehicleId = -1; c.hospitalId = -1;
+                if (!(ls >> c.id >> c.h >> c.st)) return false;
+                ls >> c.vehicleId >> c.hospitalId; // optional fields keep older saves readable
+                cs.push_back(c);
+            } else if (key == "hospital") {
+                HSave h{};
+                if (!(ls >> h.id >> h.occ)) return false;
+                hs.push_back(h);
+            }
+        }
+    } catch (const std::exception&) {
+        return false;
     }
+    if (lvl < 1 || lvl > 5 || tm < 0 || vs.size() < 4 || cs.size() < 5 || hs.size() < 2)
+        return false;
+    DisasterMap validationMap;
+    validationMap.loadLevel(lvl);
+    for (const auto& v : vs)
+        if (v.id < 1 || v.id > 4 || !validationMap.inBounds({v.r, v.c})) return false;
+    for (const auto& c : cs)
+        if (c.id < 1 || c.id > 5 || c.h < 0 || c.h > 100 ||
+            c.st < (int)CivilianStatus::Waiting || c.st > (int)CivilianStatus::Treated ||
+            c.vehicleId < -1 || c.vehicleId > 4 || c.hospitalId < -1 || c.hospitalId > 2) return false;
+    for (const auto& h : hs)
+        if (h.id < 1 || h.id > 2 || h.occ < 0) return false;
     newMission(lvl);
     score_ = sc; timeLeft_ = tm;
-    for (auto& s : vs) if (Vehicle* v = findVehicle(s.id)) { v->setPosition({s.r, s.c}); }
-    // fuel/supplies restored via const_cast-free approach: re-create is complex; store directly:
-    for (auto& s : vs) {
-        for (auto& v : vehicles_) if (v->id() == s.id) {
-            // consume/refuel to reach saved values
-            while (v->fuel() > s.f) v->consumeFuel(1);
-            while (v->fuel() < s.f) { v->refuel(); break; }
-            while (v->supplies() > s.s) v->useSupply();
-        }
+    for (auto& s : vs) if (Vehicle* v = findVehicle(s.id)) {
+        v->setPosition({s.r, s.c});
+        v->restoreResources(s.f, s.s);
     }
-    for (auto& s : cs) if (Civilian* c = findCivilian(s.id)) { c->setHealth(s.h); c->setStatus((CivilianStatus)s.st); }
+    for (auto& s : cs) if (Civilian* c = findCivilian(s.id)) {
+        c->setHealth(s.h);
+        if (s.st >= (int)CivilianStatus::Waiting && s.st <= (int)CivilianStatus::Treated)
+            c->setStatus((CivilianStatus)s.st);
+        c->setAssignedVehicleId(s.vehicleId);
+        c->setHospitalId(s.hospitalId);
+    }
     for (auto& s : hs) if (Hospital* h = findHospital(s.id)) h->setOccupied(s.occ);
     return true;
 }

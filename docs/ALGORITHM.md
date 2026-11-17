@@ -18,8 +18,8 @@ path = reconstruct via pred from goal to start
 Time `O((V+E) log V)`, space `O(V)`. V = 117 cells.
 
 ## Route modes (weighted upgrade)
-- **FASTEST**: road=1, house=2, fire=3.
+- **FASTEST**: road=1, house=2, fire=2 (FireTruck's virtual movement cost is applied).
 - **SAFEST**: base 1 + hazard penalties + proximity penalties near fire/flood.
-- **LOW_FUEL**: road/hospital/station=1, house=3, fire=5.
+- **LOW_FUEL**: every traversed cell costs one fuel in the engine, so each edge weighs 1 and Dijkstra selects the fewest-cell path.
 
-All weights are non-negative, so Dijkstra remains correct. The visualizer shows the real `visitedOrder`, `dist`, and `pred` from the C++ run.
+The engine uses the polymorphic `Vehicle::canEnter` and `Vehicle::moveCost` overload; the route strategy may add a larger terrain/risk penalty. All weights are non-negative, so Dijkstra remains correct. The visualizer reports the real `visitedOrder`, `dist`, and `pred` from the C++ run.

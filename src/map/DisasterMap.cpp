@@ -1,8 +1,49 @@
 #include "../../include/map/DisasterMap.hpp"
 #include <algorithm>
+#include <queue>
 #include <random>
 
 namespace drc {
+
+namespace {
+bool reservedMissionCell(Position p) {
+    // Keep the standard fleet, civilians and facilities accessible in every level.
+    static const Position reserved[] = {
+        {1,1}, {1,2}, {2,7}, {4,6}, {2,2}, {4,4}, {6,6}, {3,10}, {7,7},
+        {0,11}, {8,11}, {2,8}
+    };
+    for (const Position cell : reserved) if (cell == p) return true;
+    return false;
+}
+
+bool standardMissionReachable(const DisasterMap& map) {
+    const Position start{1,1};
+    const Position destinations[] = {
+        {2,2}, {4,4}, {6,6}, {3,10}, {7,7}, {0,11}, {8,11}, {2,8}
+    };
+    for (const Position goal : destinations) {
+        if (!map.isWalkable(start) || !map.isWalkable(goal)) return false;
+        std::vector<std::vector<bool>> visited(DisasterMap::ROWS,
+                                               std::vector<bool>(DisasterMap::COLS, false));
+        std::queue<Position> pending;
+        pending.push(start);
+        visited[start.row][start.col] = true;
+        bool found = false;
+        while (!pending.empty() && !found) {
+            const Position current = pending.front();
+            pending.pop();
+            if (current == goal) { found = true; break; }
+            for (const Position next : map.neighbors(current)) {
+                if (visited[next.row][next.col] || !map.isWalkable(next)) continue;
+                visited[next.row][next.col] = true;
+                pending.push(next);
+            }
+        }
+        if (!found) return false;
+    }
+    return true;
+}
+}
 
 DisasterMap::DisasterMap() { loadClassicMap(); }
 
@@ -37,7 +78,11 @@ void DisasterMap::loadLevel(int level) {
         while (placed < n && guard++ < 500) {
             int r = 1 + (rng() % (ROWS-2));
             int c = 1 + (rng() % (COLS-2));
-            if (grid_[r][c] == CellType::Road) { grid_[r][c] = t; ++placed; }
+            const Position candidate{r, c};
+            if (grid_[r][c] != CellType::Road || reservedMissionCell(candidate)) continue;
+            grid_[r][c] = t;
+            if (standardMissionReachable(*this)) ++placed;
+            else grid_[r][c] = CellType::Road; // never strand a standard mission objective
         }
     };
     if (level == 2) { scatter(CellType::Flood, 4); scatter(CellType::Blocked, 4); }
@@ -55,7 +100,12 @@ void DisasterMap::randomize(int level, unsigned seed) {
     for (int i = 0; i < 6; ++i) {
         int r = 1 + (rng() % (ROWS-2));
         int c = 1 + (rng() % (COLS-2));
-        if (grid_[r][c] == CellType::Road) grid_[r][c] = (i % 3 == 0) ? CellType::Fire : (i % 3 == 1 ? CellType::Flood : CellType::Blocked);
+        const Position candidate{r, c};
+        if (grid_[r][c] != CellType::Road || reservedMissionCell(candidate)) continue;
+        const CellType hazard = (i % 3 == 0) ? CellType::Fire :
+                                (i % 3 == 1 ? CellType::Flood : CellType::Blocked);
+        grid_[r][c] = hazard;
+        if (!standardMissionReachable(*this)) grid_[r][c] = CellType::Road;
     }
     grid_[0][11] = CellType::Hospital; grid_[8][11] = CellType::Hospital; grid_[2][8] = CellType::FireStation;
 }

@@ -1,7 +1,9 @@
 #pragma once
 #include "../core/Position.hpp"
 #include "../core/GameState.hpp"
+#include <algorithm>
 #include <string>
+#include <utility>
 
 namespace drc {
 
@@ -53,7 +55,8 @@ public:
     void setAssignedVehicleId(int v) { assignedVehicleId_ = v; }
     int hospitalId() const { return hospitalId_; }
     void setHospitalId(int h) { hospitalId_ = h; }
-    bool isRescued() const { return status_ == CivilianStatus::Rescued || status_ == CivilianStatus::Admitted || status_ == CivilianStatus::Treated; }
+    // Treatment improves health but does not complete a rescue or hospital admission.
+    bool isRescued() const { return status_ == CivilianStatus::Rescued || status_ == CivilianStatus::Admitted; }
     // Recommendation score: higher priority + lower health = more urgent.
     int urgencyScore() const { return priority_ * 10 + (100 - health_) / 5; }
 private:

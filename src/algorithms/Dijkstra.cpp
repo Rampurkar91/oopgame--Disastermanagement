@@ -1,17 +1,78 @@
 #include "../../include/algorithms/Dijkstra.hpp"
-#include <queue>
-#include <limits>
+#include "../../include/vehicles/Vehicle.hpp"
 #include <algorithm>
+#include <limits>
+#include <queue>
+#include <utility>
 
 namespace drc {
 
 namespace {
 struct Node {
-    int dist;
-    Position pos;
-    bool operator<(Node const& o) const { return dist > o.dist; } // for min-heap
+    int distance;
+    Position position;
+    bool operator<(const Node& other) const { return distance > other.distance; } // min-heap
 };
-const int INF = std::numeric_limits<int>::max() / 4;
+constexpr int INF = std::numeric_limits<int>::max() / 4;
+
+template <typename CanEnter, typename MoveCost>
+DijkstraResult runDijkstra(const DisasterMap& map, Position start, Position goal,
+                           const RouteStrategy& strategy, CanEnter canEnter, MoveCost moveCost) {
+    DijkstraResult result;
+    const int rows = map.rows();
+    const int cols = map.cols();
+    result.dist.assign(rows, std::vector<int>(cols, INF));
+    result.pred.assign(rows, std::vector<Position>(cols, Position{-1, -1}));
+    if (!map.inBounds(start) || !map.inBounds(goal) || !canEnter(goal)) return result;
+
+    std::priority_queue<Node> pending;
+    result.dist[start.row][start.col] = 0;
+    pending.push({0, start});
+    std::vector<std::vector<bool>> finalized(rows, std::vector<bool>(cols, false));
+
+    while (!pending.empty()) {
+        const Node current = pending.top();
+        pending.pop();
+        const Position from = current.position;
+        if (finalized[from.row][from.col] || current.distance != result.dist[from.row][from.col]) continue;
+        finalized[from.row][from.col] = true;
+        result.visitedOrder.push_back(from);
+        if (from == goal) break;
+
+        for (const Position to : map.neighbors(from)) {
+            if (!canEnter(to)) continue;
+            int edge = strategy.edgeCost(from, to, map);
+            int vehicleCost = moveCost(to);
+            // Both components represent a minimum traversal cost for this edge.
+            // The strategy may add avoidance/risk penalties; vehicle polymorphism
+            // enforces special terrain costs such as a FireTruck entering fire.
+            edge = std::max(0, edge);
+            vehicleCost = std::max(0, vehicleCost);
+            const int weight = strategy.optimizesFuel() ? edge : std::max(edge, vehicleCost);
+            if (result.dist[from.row][from.col] + weight < result.dist[to.row][to.col]) {
+                result.dist[to.row][to.col] = result.dist[from.row][from.col] + weight;
+                result.pred[to.row][to.col] = from;
+                pending.push({result.dist[to.row][to.col], to});
+            }
+        }
+    }
+
+    if (result.dist[goal.row][goal.col] == INF) return result;
+    result.found = true;
+    result.distance = result.dist[goal.row][goal.col];
+    Position current = goal;
+    std::vector<Position> reversed;
+    while (!(current == start)) {
+        reversed.push_back(current);
+        current = result.pred[current.row][current.col];
+        if (current.row == -1) { result.found = false; return result; }
+    }
+    reversed.push_back(start);
+    std::reverse(reversed.begin(), reversed.end());
+    result.path = std::move(reversed);
+    result.steps = static_cast<int>(result.path.size()) - 1;
+    return result;
+}
 }
 
 DijkstraResult Dijkstra::findPath(const DisasterMap& map, Position start, Position goal) {
@@ -27,56 +88,25 @@ DijkstraResult Dijkstra::findPath(const DisasterMap& map, Position start, Positi
 
 DijkstraResult Dijkstra::findPath(const DisasterMap& map, Position start, Position goal,
                                   const RouteStrategy& strategy, const std::string& vehicleKind) {
-    DijkstraResult res;
-    int R = map.rows(), C = map.cols();
-    res.dist.assign(R, std::vector<int>(C, INF));
-    res.pred.assign(R, std::vector<Position>(C, Position{-1,-1}));
-    if (!map.inBounds(start) || !map.inBounds(goal)) return res;
-    if (!map.isWalkableFor(start, vehicleKind) && start != goal) {
-        // Start may be on a facility/house edge; allow starting position regardless.
-    }
-    if (!map.isWalkableFor(goal, vehicleKind)) return res; // invalid destination rejected
+    const auto canEnter = [&map, &vehicleKind](Position p) { return map.isWalkableFor(p, vehicleKind); };
+    const auto moveCost = [&map, &vehicleKind](Position p) {
+        return vehicleKind == "FireTruck" && map.getCell(p) == CellType::Fire ? 2 : 1;
+    };
+    return runDijkstra(map, start, goal, strategy, canEnter, moveCost);
+}
 
-    std::priority_queue<Node> pq;
-    res.dist[start.row][start.col] = 0;
-    pq.push({0, start});
-    std::vector<std::vector<bool>> done(R, std::vector<bool>(C, false));
+DijkstraResult Dijkstra::findPath(const DisasterMap& map, Position start, Position goal,
+                                  RouteMode mode, const Vehicle& vehicle) {
+    if (mode == RouteMode::Safest) return findPath(map, start, goal, SafestRouteStrategy{}, vehicle);
+    if (mode == RouteMode::LowFuel) return findPath(map, start, goal, LowFuelRouteStrategy{}, vehicle);
+    return findPath(map, start, goal, FastestRouteStrategy{}, vehicle);
+}
 
-    while (!pq.empty()) {
-        Node cur = pq.top(); pq.pop();
-        Position u = cur.pos;
-        if (done[u.row][u.col]) continue;
-        if (cur.dist != res.dist[u.row][u.col]) continue;
-        done[u.row][u.col] = true;
-        res.visitedOrder.push_back(u);
-        if (u == goal) break;
-        for (Position v : map.neighbors(u)) {
-            if (!map.isWalkableFor(v, vehicleKind)) continue;
-            int w = strategy.edgeCost(u, v, map);
-            if (w < 0) w = 0; // Dijkstra requires non-negative weights
-            if (res.dist[u.row][u.col] + w < res.dist[v.row][v.col]) {
-                res.dist[v.row][v.col] = res.dist[u.row][u.col] + w;
-                res.pred[v.row][v.col] = u;
-                pq.push({res.dist[v.row][v.col], v});
-            }
-        }
-    }
-    if (res.dist[goal.row][goal.col] == INF) return res;
-    res.found = true;
-    res.distance = res.dist[goal.row][goal.col];
-    // Reconstruct path via predecessor array.
-    Position cur = goal;
-    std::vector<Position> rev;
-    while (!(cur == start)) {
-        rev.push_back(cur);
-        cur = res.pred[cur.row][cur.col];
-        if (cur.row == -1) { res.found = false; return res; }
-    }
-    rev.push_back(start);
-    std::reverse(rev.begin(), rev.end());
-    res.path = rev;
-    res.steps = (int)rev.size() - 1;
-    return res;
+DijkstraResult Dijkstra::findPath(const DisasterMap& map, Position start, Position goal,
+                                  const RouteStrategy& strategy, const Vehicle& vehicle) {
+    const auto canEnter = [&map, &vehicle](Position p) { return vehicle.canEnter(map.getCell(p)); };
+    const auto moveCost = [&map, &vehicle](Position p) { return vehicle.moveCost(map.getCell(p)); };
+    return runDijkstra(map, start, goal, strategy, canEnter, moveCost);
 }
 
 } // namespace drc

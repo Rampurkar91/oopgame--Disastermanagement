@@ -3,10 +3,14 @@
 #include "../map/DisasterMap.hpp"
 #include "../core/GameState.hpp"
 #include "RouteStrategy.hpp"
-#include <vector>
+#include <cstdlib>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace drc {
+
+class Vehicle;
 
 struct DijkstraResult {
     bool found = false;
@@ -22,13 +26,18 @@ struct DijkstraResult {
 // upgraded to weighted edges + vehicle-aware walkability + route strategies.
 class Dijkstra {
 public:
-    // Original unit-cost behaviour: every step costs 1.
+    // Convenience entry point: FASTEST mode with ordinary ground-vehicle rules.
     static DijkstraResult findPath(const DisasterMap& map, Position start, Position goal);
     // Weighted + strategy + vehicle kind ("Ambulance","RescueVan","FireTruck","Helicopter").
     static DijkstraResult findPath(const DisasterMap& map, Position start, Position goal,
                                    RouteMode mode, const std::string& vehicleKind);
     static DijkstraResult findPath(const DisasterMap& map, Position start, Position goal,
                                    const RouteStrategy& strategy, const std::string& vehicleKind);
+    // Preferred OOP overload: dispatches terrain access/cost through the vehicle's virtual methods.
+    static DijkstraResult findPath(const DisasterMap& map, Position start, Position goal,
+                                   RouteMode mode, const Vehicle& vehicle);
+    static DijkstraResult findPath(const DisasterMap& map, Position start, Position goal,
+                                   const RouteStrategy& strategy, const Vehicle& vehicle);
     static int manhattan(Position a, Position b) { return std::abs(a.row - b.row) + std::abs(a.col - b.col); }
 };
 

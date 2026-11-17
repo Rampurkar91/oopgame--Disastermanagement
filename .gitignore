@@ -3,3 +3,5 @@ build/
 *.exe
 saves/save.txt
 saves/test_save.txt
+saves/test_settings.txt
+saves/bad_save.txt
